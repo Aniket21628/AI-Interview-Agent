@@ -22,8 +22,8 @@ allowed_origins = list(dict.fromkeys(settings.ALLOWED_ORIGINS + [settings.CLIENT
 
 fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -99,7 +99,7 @@ async def upload_resume(file: UploadFile = File(...)) -> dict[str, Any]:
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=allowed_origins,
+    cors_allowed_origins="*",
     logger=settings.DEBUG,
     engineio_logger=settings.DEBUG,
 )
