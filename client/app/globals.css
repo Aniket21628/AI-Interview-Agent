@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-gray-50 text-gray-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary-200 hover:bg-secondary-300 text-secondary-800 font-medium py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-secondary-500 focus:ring-offset-2;
+  }
+  
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
+  }
+  
+  .chat-message {
+    @apply mb-4 p-4 rounded-lg max-w-3xl;
+  }
+  
+  .chat-message.user {
+    @apply bg-primary-100 text-primary-900 ml-auto;
+  }
+  
+  .chat-message.assistant {
+    @apply bg-white text-gray-900 border border-gray-200;
+  }
+  
+  .voice-wave {
+    @apply w-1 bg-primary-500 rounded-full mx-px;
+    animation: wave 1.5s ease-in-out infinite;
+  }
+  
+  .voice-wave:nth-child(2) {
+    animation-delay: 0.1s;
+  }
+  
+  .voice-wave:nth-child(3) {
+    animation-delay: 0.2s;
+  }
+  
+  .voice-wave:nth-child(4) {
+    animation-delay: 0.3s;
+  }
+  
+  .voice-wave:nth-child(5) {
+    animation-delay: 0.4s;
+  }
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
