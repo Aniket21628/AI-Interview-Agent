@@ -39,6 +39,7 @@ class InterviewSession:
         self.needs_follow_up = False
         self.user_requested_repeat = False
         self.user_requested_clarification = False
+        self.last_llm_error_at: Optional[float] = None
         self.resume_text = str(self.candidate_profile.get("resumeText") or self.candidate_profile.get("resume") or "").strip()
         self.resume_summary = str(self.candidate_profile.get("resumeSummary") or "").strip()
         self.name = str(self.candidate_profile.get("name") or "Candidate").strip()
@@ -126,6 +127,10 @@ class InterviewSession:
         return {"quality": ANSWER_QUALITY["GOOD"], "needs_follow_up": False}
 
     def _call_llm(self, prompt: str) -> Optional[str]:
+        now = datetime.now(timezone.utc).timestamp()
+        if self.last_llm_error_at and now - self.last_llm_error_at < 60:
+            return None
+
         try:
             llm = get_chat_model()
             response = llm.invoke(prompt)
@@ -134,7 +139,10 @@ class InterviewSession:
                 content = str(content)
             text = content.strip()
             return text or None
-        except Exception:
+        except Exception as exc:
+            error_text = str(exc).lower()
+            if any(marker in error_text for marker in ("429", "quota", "resourceexhausted", "rate limit", "free_tier_requests")):
+                self.last_llm_error_at = now
             return None
 
     def _evaluate_answer_with_llm(self, answer: str) -> Dict[str, Any]:

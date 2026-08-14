@@ -12,6 +12,19 @@ def get_llm_provider() -> str:
     return provider
 
 
+def is_quota_error(error: Exception) -> bool:
+    text = str(error).lower()
+    quota_markers = (
+        "429",
+        "quota",
+        "resourceexhausted",
+        "rate limit",
+        "exceeded your current quota",
+        "free_tier_requests",
+    )
+    return any(marker in text for marker in quota_markers)
+
+
 def get_chat_model():
     provider = get_llm_provider()
 
@@ -29,8 +42,11 @@ def get_chat_model():
     if not api_key:
         raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY is required when LLM_PROVIDER=gemini")
 
+    model_name = (os.getenv("GEMINI_MODEL") or "gemini-1.5-flash").strip() or "gemini-1.5-flash"
     return ChatGoogleGenerativeAI(
-        model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+        model=model_name,
         google_api_key=api_key,
         temperature=0.7,
+        retries=0,
+        request_timeout=15,
     )

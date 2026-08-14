@@ -23,6 +23,9 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
   const microphoneRef = useRef(null)
   const animationFrameRef = useRef(null)
   const submittedTranscriptRef = useRef('')
+  const pendingTranscriptRef = useRef('')
+  const finalizeTranscriptTimeoutRef = useRef(null)
+  const shouldRestartRef = useRef(false)
 
   useEffect(() => {
     // Check for Web Speech API support
@@ -70,14 +73,29 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
       }
 
       const cleanedFinal = finalTranscript.trim()
-      setTranscript(prev => `${prev} ${cleanedFinal}`.trim())
+      if (cleanedFinal) {
+        pendingTranscriptRef.current = [pendingTranscriptRef.current, cleanedFinal]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+        setTranscript(pendingTranscriptRef.current)
+      }
       setInterimTranscript(interimTranscript.trim())
 
+      if (finalizeTranscriptTimeoutRef.current) {
+        clearTimeout(finalizeTranscriptTimeoutRef.current)
+      }
+
       if (cleanedFinal && cleanedFinal !== submittedTranscriptRef.current) {
-        submittedTranscriptRef.current = cleanedFinal
-        setTimeout(() => {
-          handleSendTranscript(cleanedFinal)
-        }, 400)
+        finalizeTranscriptTimeoutRef.current = setTimeout(() => {
+          const pendingText = pendingTranscriptRef.current.trim()
+          if (!pendingText) {
+            return
+          }
+
+          submittedTranscriptRef.current = pendingText
+          handleSendTranscript(pendingText)
+        }, 700)
       }
     }
 
@@ -85,12 +103,25 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
       console.error('Speech recognition error:', event.error)
       setError(`Speech recognition error: ${event.error}`)
       setIsListening(false)
+      shouldRestartRef.current = false
       cleanup()
     }
 
     recognition.onend = () => {
-      setIsListening(false)
       setInterimTranscript('')
+      if (shouldRestartRef.current && !disabled) {
+        setTimeout(() => {
+          if (recognitionRef.current && shouldRestartRef.current && !disabled) {
+            try {
+              recognitionRef.current.start()
+            } catch (error) {
+              console.warn('Speech recognition restart failed:', error)
+            }
+          }
+        }, 250)
+      } else {
+        setIsListening(false)
+      }
       console.log('Speech recognition ended')
     }
 
@@ -101,29 +132,36 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
     if (!isSupported || disabled) return
 
     try {
-      // Request microphone permission and start audio level monitoring
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       await initializeAudioContext(stream)
-      
-      // Start speech recognition
+
       if (recognitionRef.current) {
+        shouldRestartRef.current = true
+        pendingTranscriptRef.current = ''
         submittedTranscriptRef.current = ''
         setTranscript('')
         setInterimTranscript('')
         setError('')
+        setIsListening(true)
         recognitionRef.current.start()
       }
     } catch (err) {
       console.error('Error starting voice recognition:', err)
+      shouldRestartRef.current = false
       setError('Microphone access denied or not available')
     }
   }
 
   const stopListening = () => {
+    shouldRestartRef.current = false
+    if (finalizeTranscriptTimeoutRef.current) {
+      clearTimeout(finalizeTranscriptTimeoutRef.current)
+    }
     if (recognitionRef.current && isListening) {
       recognitionRef.current.stop()
     }
     cleanup()
+    setIsListening(false)
   }
 
   const initializeAudioContext = async (stream) => {
@@ -181,16 +219,27 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
   }
 
   const handleSendTranscript = (text) => {
-    if (text && onVoiceMessage) {
-      onVoiceMessage(text)
-      setTranscript('')
-      setInterimTranscript('')
-      stopListening()
+    const trimmedText = (text || '').trim()
+    if (!trimmedText || !onVoiceMessage) {
+      return
+    }
+
+    if (trimmedText === submittedTranscriptRef.current) {
+      return
+    }
+
+    submittedTranscriptRef.current = trimmedText
+    onVoiceMessage(trimmedText)
+    pendingTranscriptRef.current = ''
+    setTranscript('')
+    setInterimTranscript('')
+    if (finalizeTranscriptTimeoutRef.current) {
+      clearTimeout(finalizeTranscriptTimeoutRef.current)
     }
   }
 
   const handleManualSend = () => {
-    const fullText = (transcript + interimTranscript).trim()
+    const fullText = (pendingTranscriptRef.current || transcript || interimTranscript).trim()
     if (fullText) {
       handleSendTranscript(fullText)
     }
