@@ -39,6 +39,12 @@ class InterviewSession:
         self.needs_follow_up = False
         self.user_requested_repeat = False
         self.user_requested_clarification = False
+        self.resume_text = str(self.candidate_profile.get("resumeText") or self.candidate_profile.get("resume") or "").strip()
+        self.resume_summary = str(self.candidate_profile.get("resumeSummary") or "").strip()
+        self.name = str(self.candidate_profile.get("name") or "Candidate").strip()
+        self.position = str(self.candidate_profile.get("position") or "the role").strip()
+        self.experience = str(self.candidate_profile.get("experience") or "").strip()
+        self.skills = [str(skill).strip() for skill in self.candidate_profile.get("skills", []) if str(skill).strip()]
 
         self._start_with_greeting()
 
@@ -49,14 +55,45 @@ class InterviewSession:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    def _profile_context(self) -> str:
+        parts = []
+        if self.name and self.name.lower() != "candidate":
+            parts.append(f"Candidate name: {self.name}")
+        if self.position:
+            parts.append(f"Target role: {self.position}")
+        if self.experience:
+            parts.append(f"Experience: {self.experience}")
+        if self.skills:
+            parts.append(f"Skills: {', '.join(self.skills[:8])}")
+        if self.resume_summary:
+            parts.append(f"Resume summary: {self.resume_summary}")
+        if self.resume_text:
+            parts.append(f"Resume context: {self.resume_text[:400]}")
+        return "; ".join(parts)
+
     def _start_with_greeting(self) -> None:
-        greetings = [
-            "Hello! Welcome to your interview today. I'm excited to get to know you better.",
-            "Hi there! Thanks for joining me today. I'm looking forward to our conversation.",
-            "Welcome! I hope you're doing well today. Let's begin with your interview.",
-        ]
-        greeting = random.choice(greetings)
-        first_question = "Let's start with introductions. Could you please tell me your name and a bit about yourself?"
+        profile_context = self._profile_context()
+        prompt = (
+            "You are an interview coach. Create a warm, short interview greeting for a candidate and a first question. "
+            f"Use this context: {profile_context or 'No extra resume context provided.'}. "
+            "Return valid JSON with exactly two keys: 'greeting' and 'question'."
+        )
+        llm_reply = self._call_llm(prompt)
+        if llm_reply:
+            try:
+                payload = json.loads(llm_reply.strip().strip("```json").strip("```"))
+                greeting = str(payload.get("greeting") or "Welcome! Let's begin your interview.")
+                first_question = str(payload.get("question") or "Could you tell me a bit about yourself and your background?")
+            except Exception:
+                greeting = "Welcome! I'm excited to learn more about you today."
+                first_question = "Could you start by telling me a little about yourself and your background?"
+        else:
+            greeting = (
+                f"Hi {self.name}! Thanks for joining me today. I'm excited to learn more about your experience for the {self.position} role."
+                if self.position and self.name
+                else "Hi there! Thanks for joining me today. I'm excited to learn more about you."
+            )
+            first_question = "Could you start by telling me a little about yourself and your background?"
 
         self.conversation_history.append(self._make_message("assistant", greeting))
         self.conversation_history.append(self._make_message("assistant", first_question))
@@ -142,7 +179,7 @@ class InterviewSession:
         prompt = (
             "You are an interview coach. Based on the candidate's previous response and current interview phase, "
             "generate exactly one short, natural follow-up interview question. "
-            f"Current phase: {self.phase}. Previous answer: {self.last_answer}. "
+            f"Current phase: {self.phase}. Candidate context: {self._profile_context()}. Previous answer: {self.last_answer}. "
             "Return only the question text."
         )
         llm_question = self._call_llm(prompt)
@@ -151,6 +188,38 @@ class InterviewSession:
             if cleaned:
                 return cleaned
         return random.choice(base_options)
+
+    def _fallback_question_set(self) -> Dict[str, List[str]]:
+        skill_summary = ", ".join(self.skills[:4]) if self.skills else "your core technical work"
+        role_context = self.position.lower() if self.position else "this role"
+        experience_context = self.experience.strip() if self.experience else "your experience"
+        candidate_name = self.name if self.name and self.name.lower() != "candidate" else "you"
+
+        return {
+            INTERVIEW_PHASES["INTRODUCTION"]: [
+                f"Can you walk me through how your experience in {experience_context} connects to this {role_context} opportunity?",
+                f"Looking at your background in {skill_summary}, what is the strongest example of impact you have delivered so far?",
+                f"What part of your career so far has been most energizing, and why does it align with this role?",
+                f"What motivates you to pursue a {role_context} position, and what makes you a strong fit for it?",
+            ],
+            INTERVIEW_PHASES["TECHNICAL"]: [
+                f"Tell me about a project where you used {skill_summary} to solve a meaningful technical problem.",
+                "What trade-offs did you consider when designing or scaling a solution, and how did you make the final decision?",
+                "Can you describe a time you debugged a complex issue and explain how you isolated the root cause?",
+                "How do you balance delivery speed with code quality or system reliability in your day-to-day work?",
+            ],
+            INTERVIEW_PHASES["BEHAVIORAL"]: [
+                "Describe a situation where you had to influence a team or stakeholder without direct authority.",
+                "Tell me about a time you had to adapt quickly when priorities changed or a project stalled.",
+                "What is a challenge you faced in a team setting, and how did you help resolve it?",
+                "Give me an example of feedback you received that improved your work, and what you changed as a result.",
+            ],
+            INTERVIEW_PHASES["CLOSING"]: [
+                f"What would success look like for {candidate_name} in the first 6 months in this role?",
+                "What questions do you have about the team, goals, or expectations for this position?",
+                "Is there anything else you want me to know about your background that would help us evaluate fit?",
+            ],
+        }
 
     def _generate_next_question(self) -> str:
         if self.phase == INTERVIEW_PHASES["INTRODUCTION"] and self.question_count >= 4:
@@ -165,7 +234,7 @@ class InterviewSession:
         else:
             prompt = (
                 "You are a recruiter. Generate the next single best interview question for a candidate. "
-                f"Current phase: {self.phase}. Candidate profile: {self.candidate_profile}. "
+                f"Current phase: {self.phase}. Candidate profile: {self._profile_context()}. "
                 f"Question count: {self.question_count}. Already asked: {self.asked_questions}. "
                 "Return only the question text."
             )
@@ -173,29 +242,9 @@ class InterviewSession:
             if llm_question:
                 question = llm_question.strip().strip('"').strip("'")
             else:
-                question_sets = {
-                    INTERVIEW_PHASES["INTRODUCTION"]: [
-                        "What are your career goals for the next few years?",
-                        "What do you know about our company and why do you want to work here?",
-                        "What are your greatest professional achievements?",
-                    ],
-                    INTERVIEW_PHASES["TECHNICAL"]: [
-                        "How do you approach debugging complex issues?",
-                        "Describe your experience with version control and collaboration tools.",
-                        "What's your process for learning new technologies?",
-                    ],
-                    INTERVIEW_PHASES["BEHAVIORAL"]: [
-                        "Describe a time when you had to meet a tight deadline.",
-                        "Tell me about a time you received constructive criticism.",
-                        "How do you handle conflicts in a team environment?",
-                    ],
-                    INTERVIEW_PHASES["CLOSING"]: [
-                        "What questions do you have about the team you'd be working with?",
-                        "When would you be available to start if offered the position?",
-                        "Is there anything else you'd like me to know about you?",
-                    ],
-                }
-                available = [q for q in question_sets.get(self.phase, question_sets[INTERVIEW_PHASES["INTRODUCTION"]]) if q not in self.asked_questions]
+                fallback_questions = self._fallback_question_set()
+                phase_questions = fallback_questions.get(self.phase, fallback_questions[INTERVIEW_PHASES["INTRODUCTION"]])
+                available = [q for q in phase_questions if q not in self.asked_questions]
                 question = random.choice(available) if available else "Thank you for your responses. Do you have any final questions for me?"
 
         self.asked_questions.append(question)
@@ -298,10 +347,12 @@ class InterviewSession:
 class SessionManager:
     def __init__(self):
         self.active_sessions: Dict[str, InterviewSession] = {}
+        self.disconnected_sessions: Dict[str, float] = {}
 
     def create_session(self, socket_id: str, candidate_profile: Optional[Dict[str, Any]] = None) -> InterviewSession:
         session = InterviewSession(socket_id, candidate_profile)
         self.active_sessions[socket_id] = session
+        self.disconnected_sessions.pop(socket_id, None)
         return session
 
     def get_session(self, socket_id: str) -> Optional[InterviewSession]:
@@ -309,3 +360,12 @@ class SessionManager:
 
     def end_session(self, socket_id: str) -> Optional[InterviewSession]:
         return self.active_sessions.pop(socket_id, None)
+
+    def mark_disconnected(self, socket_id: str) -> None:
+        if socket_id in self.active_sessions:
+            self.disconnected_sessions[socket_id] = datetime.now(timezone.utc).timestamp()
+
+    def reconnect_session(self, socket_id: str) -> Optional[InterviewSession]:
+        if socket_id in self.disconnected_sessions:
+            self.disconnected_sessions.pop(socket_id, None)
+        return self.active_sessions.get(socket_id)

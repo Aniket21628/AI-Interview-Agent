@@ -54,6 +54,12 @@ jspm_packages/
 # Yarn Integrity file
 .yarn-integrity
 
+# Python cache and generated files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
 # dotenv environment variables file
 .env
 .env.local
