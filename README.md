@@ -110,9 +110,6 @@ npm run dev
 ```
 *The frontend client will be available at `http://localhost:3000`.*
 
-## 🌐 Deployment
-
-For detailed deployment instructions, including how to host the backend on **Render** and the frontend on **Vercel**, please refer to the [`DEPLOYMENT.md`](./DEPLOYMENT.md) file included in this repository. 
 
 ## 📄 License
 
