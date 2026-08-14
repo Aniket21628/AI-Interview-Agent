@@ -11,7 +11,8 @@ export default function Home() {
     name: '',
     position: '',
     experience: '',
-    skills: []
+    skills: [],
+    resumeText: ''
   })
 
   const handleStartInterview = (profile) => {
@@ -25,7 +26,8 @@ export default function Home() {
       name: '',
       position: '',
       experience: '',
-      skills: []
+      skills: [],
+      resumeText: ''
     })
   }
 

@@ -2,17 +2,21 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { UserIcon, BriefcaseIcon, AcademicCapIcon, MicrophoneIcon } from '@heroicons/react/24/outline'
+import { UserIcon, BriefcaseIcon, AcademicCapIcon, MicrophoneIcon, DocumentTextIcon } from '@heroicons/react/24/outline'
+
+const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:5002'
 
 export default function WelcomeScreen({ onStartInterview }) {
   const [formData, setFormData] = useState({
     name: '',
     position: '',
     experience: '',
-    skills: []
+    skills: [],
+    resumeText: ''
   })
   const [currentSkill, setCurrentSkill] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState('')
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
@@ -38,6 +42,37 @@ export default function WelcomeScreen({ onStartInterview }) {
       ...prev,
       skills: prev.skills.filter(skill => skill !== skillToRemove)
     }))
+  }
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    
+    if (file.type !== 'application/pdf') {
+      setUploadStatus('Please upload a PDF file.')
+      return
+    }
+
+    setUploadStatus('Uploading and parsing PDF...')
+    const formDataObj = new FormData()
+    formDataObj.append('file', file)
+
+    try {
+      const res = await fetch(`${SERVER_URL}/api/upload-resume`, {
+        method: 'POST',
+        body: formDataObj,
+      })
+      if (!res.ok) throw new Error('Failed to parse PDF')
+      const data = await res.json()
+      setFormData(prev => ({
+        ...prev,
+        resumeText: data.text
+      }))
+      setUploadStatus('Resume attached successfully!')
+    } catch (err) {
+      console.error(err)
+      setUploadStatus('Failed to upload resume. Please try again.')
+    }
   }
 
   const handleSubmit = async (e) => {
@@ -209,6 +244,25 @@ export default function WelcomeScreen({ onStartInterview }) {
                     </motion.span>
                   ))}
                 </div>
+              )}
+            </div>
+
+            {/* Resume Input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <DocumentTextIcon className="w-4 h-4 inline mr-2" />
+                Upload Resume (PDF)
+              </label>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={handleFileUpload}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+              />
+              {uploadStatus && (
+                <p className={`mt-2 text-sm ${uploadStatus.includes('success') ? 'text-green-600' : (uploadStatus.includes('Uploading') ? 'text-blue-600' : 'text-red-600')}`}>
+                  {uploadStatus}
+                </p>
               )}
             </div>
 

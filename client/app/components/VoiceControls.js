@@ -2,256 +2,155 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  MicrophoneIcon, 
-  StopIcon,
-  SpeakerWaveIcon,
-  ExclamationTriangleIcon
-} from '@heroicons/react/24/outline'
+import { MicrophoneIcon, StopIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline'
+
+const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:5000'
 
 export default function VoiceControls({ onVoiceMessage, disabled }) {
   const [isListening, setIsListening] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [transcript, setTranscript] = useState('')
-  const [interimTranscript, setInterimTranscript] = useState('')
-  const [isSupported, setIsSupported] = useState(false)
   const [error, setError] = useState('')
-  const [audioLevel, setAudioLevel] = useState(0)
+  const [recognitionSupported, setRecognitionSupported] = useState(false)
 
+  const transcriptRef = useRef('')
   const recognitionRef = useRef(null)
-  const audioContextRef = useRef(null)
-  const analyserRef = useRef(null)
-  const microphoneRef = useRef(null)
-  const animationFrameRef = useRef(null)
-  const submittedTranscriptRef = useRef('')
-  const pendingTranscriptRef = useRef('')
-  const finalizeTranscriptTimeoutRef = useRef(null)
-  const shouldRestartRef = useRef(false)
+  const mediaRecorderRef = useRef(null)
+  const streamRef = useRef(null)
+  const chunksRef = useRef([])
 
   useEffect(() => {
-    // Check for Web Speech API support
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (SpeechRecognition) {
-        setIsSupported(true)
-        initializeSpeechRecognition(SpeechRecognition)
-      } else {
-        setError('Speech recognition is not supported in this browser')
-      }
-    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    setRecognitionSupported(Boolean(SpeechRecognition))
 
     return () => {
-      cleanup()
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null
+        recognitionRef.current.onend = null
+        recognitionRef.current.onerror = null
+        recognitionRef.current.stop()
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop())
+      }
     }
   }, [])
 
-  const initializeSpeechRecognition = (SpeechRecognition) => {
+  const resetVoiceState = () => {
+    chunksRef.current = []
+    transcriptRef.current = ''
+    setTranscript('')
+  }
+
+  const sendTextToApp = (text) => {
+    const cleanText = text?.trim()
+    if (!cleanText) return
+
+    onVoiceMessage?.(cleanText)
+    resetVoiceState()
+  }
+
+  const startWebSpeechCapture = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setError('This browser does not support Web Speech API. Falling back to microphone upload.')
+      return startFallbackCapture()
+    }
+
     const recognition = new SpeechRecognition()
-    
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'en-US'
     recognition.maxAlternatives = 1
 
     recognition.onstart = () => {
-      setIsListening(true)
       setError('')
-      console.log('Speech recognition started')
+      setIsListening(true)
+      resetVoiceState()
     }
 
     recognition.onresult = (event) => {
-      let finalTranscript = ''
-      let interimTranscript = ''
+      let finalText = ''
+      let interim = ''
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const currentTranscript = event.results[i][0].transcript
+      for (let i = 0; i < event.results.length; i += 1) {
+        const result = event.results[i]
+        const text = result[0]?.transcript || ''
 
-        if (event.results[i].isFinal) {
-          finalTranscript += currentTranscript + ' '
+        if (result.isFinal) {
+          finalText += `${text} `
         } else {
-          interimTranscript += currentTranscript
+          interim += `${text} `
         }
       }
 
-      const cleanedFinal = finalTranscript.trim()
-      if (cleanedFinal) {
-        pendingTranscriptRef.current = [pendingTranscriptRef.current, cleanedFinal]
-          .filter(Boolean)
-          .join(' ')
-          .trim()
-        setTranscript(pendingTranscriptRef.current)
-      }
-      setInterimTranscript(interimTranscript.trim())
-
-      if (finalizeTranscriptTimeoutRef.current) {
-        clearTimeout(finalizeTranscriptTimeoutRef.current)
-      }
-
-      if (cleanedFinal && cleanedFinal !== submittedTranscriptRef.current) {
-        finalizeTranscriptTimeoutRef.current = setTimeout(() => {
-          const pendingText = pendingTranscriptRef.current.trim()
-          if (!pendingText) {
-            return
-          }
-
-          submittedTranscriptRef.current = pendingText
-          handleSendTranscript(pendingText)
-        }, 700)
-      }
+      const currentText = (finalText || interim).trim()
+      transcriptRef.current = currentText
+      setTranscript(currentText)
     }
 
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error)
-      setError(`Speech recognition error: ${event.error}`)
+      setError(`Speech recognition failed: ${event.error}. Please try again.`)
       setIsListening(false)
-      shouldRestartRef.current = false
-      cleanup()
     }
 
     recognition.onend = () => {
-      setInterimTranscript('')
-      if (shouldRestartRef.current && !disabled) {
-        setTimeout(() => {
-          if (recognitionRef.current && shouldRestartRef.current && !disabled) {
-            try {
-              recognitionRef.current.start()
-            } catch (error) {
-              console.warn('Speech recognition restart failed:', error)
-            }
-          }
-        }, 250)
-      } else {
-        setIsListening(false)
+      setIsListening(false)
+      if (!transcriptRef.current.trim()) {
+        setError('No transcript captured. Please speak again.')
       }
-      console.log('Speech recognition ended')
     }
 
     recognitionRef.current = recognition
+    recognition.start()
   }
 
-  const startListening = async () => {
-    if (!isSupported || disabled) return
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      await initializeAudioContext(stream)
-
-      if (recognitionRef.current) {
-        shouldRestartRef.current = true
-        pendingTranscriptRef.current = ''
-        submittedTranscriptRef.current = ''
-        setTranscript('')
-        setInterimTranscript('')
-        setError('')
-        setIsListening(true)
-        recognitionRef.current.start()
-      }
-    } catch (err) {
-      console.error('Error starting voice recognition:', err)
-      shouldRestartRef.current = false
-      setError('Microphone access denied or not available')
-    }
-  }
-
-  const stopListening = () => {
-    shouldRestartRef.current = false
-    if (finalizeTranscriptTimeoutRef.current) {
-      clearTimeout(finalizeTranscriptTimeoutRef.current)
-    }
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop()
-    }
-    cleanup()
+  const startFallbackCapture = () => {
+    setError('Speech Recognition API is not supported in this browser. Please use Chrome, Edge, or Safari.')
     setIsListening(false)
   }
 
-  const initializeAudioContext = async (stream) => {
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-      const analyser = audioContext.createAnalyser()
-      const microphone = audioContext.createMediaStreamSource(stream)
-      
-      analyser.smoothingTimeConstant = 0.8
-      analyser.fftSize = 1024
-      
-      microphone.connect(analyser)
-      
-      audioContextRef.current = audioContext
-      analyserRef.current = analyser
-      microphoneRef.current = microphone
-      
-      monitorAudioLevel()
-    } catch (err) {
-      console.error('Error initializing audio context:', err)
-    }
-  }
+  const startListening = () => {
+    if (disabled) return
 
-  const monitorAudioLevel = () => {
-    if (!analyserRef.current) return
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount)
-    
-    const updateLevel = () => {
-      if (!isListening) return
-
-      analyserRef.current.getByteFrequencyData(dataArray)
-      
-      const average = dataArray.reduce((a, b) => a + b) / dataArray.length
-      const normalizedLevel = Math.min(average / 128, 1)
-      
-      setAudioLevel(normalizedLevel)
-      
-      animationFrameRef.current = requestAnimationFrame(updateLevel)
-    }
-    
-    updateLevel()
-  }
-
-  const cleanup = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-    }
-    
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-    }
-    
-    setAudioLevel(0)
-  }
-
-  const handleSendTranscript = (text) => {
-    const trimmedText = (text || '').trim()
-    if (!trimmedText || !onVoiceMessage) {
+    if (recognitionSupported) {
+      startWebSpeechCapture()
       return
     }
 
-    if (trimmedText === submittedTranscriptRef.current) {
+    startFallbackCapture()
+  }
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
       return
     }
 
-    submittedTranscriptRef.current = trimmedText
-    onVoiceMessage(trimmedText)
-    pendingTranscriptRef.current = ''
-    setTranscript('')
-    setInterimTranscript('')
-    if (finalizeTranscriptTimeoutRef.current) {
-      clearTimeout(finalizeTranscriptTimeoutRef.current)
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
     }
+
+    setIsListening(false)
   }
 
   const handleManualSend = () => {
-    const fullText = (pendingTranscriptRef.current || transcript || interimTranscript).trim()
-    if (fullText) {
-      handleSendTranscript(fullText)
+    const value = transcriptRef.current.trim()
+    if (!value) {
+      setError('There is no transcript ready to send yet.')
+      return
     }
+
+    sendTextToApp(value)
   }
 
-  if (!isSupported) {
+  if (isProcessing) {
     return (
-      <div className="flex items-center justify-center p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <ExclamationTriangleIcon className="w-5 h-5 text-yellow-600 mr-2" />
-        <span className="text-sm text-yellow-800">
-          Voice input is not supported in this browser
-        </span>
+      <div className="flex items-center justify-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-2" />
+        <span className="text-sm text-blue-800">Processing your voice response...</span>
       </div>
     )
   }
@@ -260,112 +159,68 @@ export default function VoiceControls({ onVoiceMessage, disabled }) {
     <div className="bg-gray-50 rounded-lg p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium text-gray-700">Voice Input</h3>
-        <div className="flex items-center space-x-2">
-          {isListening && (
-            <motion.div
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-              className="flex items-center text-red-600"
-            >
-              <div className="w-2 h-2 bg-red-600 rounded-full mr-1"></div>
-              <span className="text-xs">Listening...</span>
-            </motion.div>
-          )}
-        </div>
+        {isListening && (
+          <div className="flex items-center text-red-600">
+            <div className="w-2 h-2 bg-red-600 rounded-full mr-1" />
+            <span className="text-xs">Listening...</span>
+          </div>
+        )}
       </div>
 
-      {/* Voice Visualization */}
-      {isListening && (
-        <div className="flex items-center justify-center mb-4">
-          <div className="flex items-end space-x-1 h-8">
-            {[...Array(5)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="voice-wave"
-                style={{
-                  height: `${Math.max(4, audioLevel * 32 + Math.random() * 8)}px`,
-                }}
-                animate={{
-                  height: [
-                    `${Math.max(4, audioLevel * 32)}px`,
-                    `${Math.max(4, audioLevel * 32 + 16)}px`,
-                    `${Math.max(4, audioLevel * 32)}px`,
-                  ],
-                }}
-                transition={{
-                  duration: 0.5 + i * 0.1,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Transcript Display */}
-      {(transcript || interimTranscript) && (
+      {transcript && (
         <div className="mb-4 p-3 bg-white border border-gray-200 rounded-lg">
-          <p className="text-sm text-gray-900">
-            {transcript}
-            <span className="text-gray-500 italic">{interimTranscript}</span>
-          </p>
+          <p className="text-sm text-gray-900">{transcript}</p>
         </div>
       )}
 
-      {/* Error Display */}
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex items-center justify-center space-x-4">
+      <div className="flex items-center justify-center space-x-3">
         {!isListening ? (
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={startListening}
-            disabled={disabled}
+            disabled={disabled || isProcessing}
             className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <MicrophoneIcon className="w-5 h-5 mr-2" />
             Start Speaking
           </motion.button>
         ) : (
-          <div className="flex space-x-3">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={stopListening}
-              className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-            >
-              <StopIcon className="w-5 h-5 mr-2" />
-              Stop
-            </motion.button>
-            
-            {(transcript || interimTranscript) && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleManualSend}
-                className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-              >
-                Send Now
-              </motion.button>
-            )}
-          </div>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={stopListening}
+            className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+            <StopIcon className="w-5 h-5 mr-2" />
+            Stop
+          </motion.button>
+        )}
+
+        {transcript && !isListening && (
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleManualSend}
+            className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-full text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+          >
+            <PaperAirplaneIcon className="w-5 h-5 mr-2" />
+            Send Now
+          </motion.button>
         )}
       </div>
 
-      {/* Instructions */}
       <div className="mt-4 text-center">
         <p className="text-xs text-gray-500">
-          {isListening 
-            ? "Speak clearly into your microphone. I'll automatically send your response when you finish speaking."
-            : "Click 'Start Speaking' and answer the question using your voice."
-          }
+          {recognitionSupported
+            ? 'Using browser speech recognition for fast live transcription.'
+            : 'Speech recognition is unavailable; using microphone fallback.'}
         </p>
       </div>
     </div>

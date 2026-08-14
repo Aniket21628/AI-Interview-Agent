@@ -28,11 +28,11 @@ class Settings:
         ).split(",")
         if origin.strip()
     ]
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    LLM_PROVIDER: str = "gemini"
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = ""
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 settings = Settings()

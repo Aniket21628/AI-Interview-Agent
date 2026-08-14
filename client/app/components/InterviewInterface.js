@@ -48,29 +48,20 @@ export default function InterviewInterface({ candidateProfile, onEndInterview })
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Auto-speak agent messages
+  // Auto-speak agent messages via Web Speech TTS
   useEffect(() => {
-    if (autoSpeak && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1]
-      if (lastMessage.role === 'assistant' && 'speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(lastMessage.content)
-        utterance.rate = 0.9
-        utterance.pitch = 1
-        utterance.volume = 0.8
-        
-        // Use a pleasant voice if available
-        const voices = speechSynthesis.getVoices()
-        const preferredVoice = voices.find(voice => 
-          voice.name.includes('Google') || 
-          voice.name.includes('Microsoft') ||
-          voice.lang.startsWith('en')
-        )
-        if (preferredVoice) {
-          utterance.voice = preferredVoice
-        }
-        
-        speechSynthesis.speak(utterance)
-      }
+    if (!autoSpeak || messages.length === 0) return
+
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage.role !== 'assistant' || !lastMessage.content) return
+
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(lastMessage.content)
+      utterance.rate = 0.9
+      utterance.pitch = 1
+      utterance.volume = 0.8
+      window.speechSynthesis.cancel()
+      window.speechSynthesis.speak(utterance)
     }
   }, [messages, autoSpeak])
 
@@ -118,7 +109,7 @@ export default function InterviewInterface({ candidateProfile, onEndInterview })
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="h-screen overflow-hidden flex flex-col bg-gray-50">
       <Toaster position="top-right" />
       
       {/* Header */}
@@ -175,7 +166,7 @@ export default function InterviewInterface({ candidateProfile, onEndInterview })
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Chat Area */}
         <div className="flex-1 flex flex-col">
           {/* Messages */}
@@ -193,11 +184,11 @@ export default function InterviewInterface({ candidateProfile, onEndInterview })
           </div>
 
           {/* Input Area */}
-          <div className="border-t bg-white p-4">
+          <div className="border-t bg-white p-3">
             <div className="max-w-4xl mx-auto">
               {/* Voice Controls */}
               {showVoiceControls && (
-                <div className="mb-4">
+                <div className="mb-2">
                   <VoiceControls 
                     onVoiceMessage={handleVoiceMessage}
                     disabled={!connected || !interviewSession || interviewStatus.complete}
@@ -262,7 +253,7 @@ export default function InterviewInterface({ candidateProfile, onEndInterview })
         </div>
 
         {/* Sidebar */}
-        <div className="w-80 bg-white border-l border-gray-200 p-4 space-y-6">
+        <div className="w-full md:w-72 lg:w-80 flex-shrink-0 bg-white md:border-l border-t md:border-t-0 border-gray-200 p-3 space-y-4 overflow-y-auto">
           <InterviewStats 
             candidateProfile={candidateProfile}
             interviewStatus={interviewStatus}
